@@ -1,34 +1,47 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
+import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      manifest: {
-        name: 'Secure P2P Audio',
-        short_name: 'P2P Audio',
-        description: 'Secure peer-to-peer audio streaming with cryptographic verification',
-        theme_color: '#ffffff',
-        icons: [
-          {
-            src: '/vite.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml'
-          }
-        ]
-      }
-    })
-  ],
-  define: {
-    global: 'globalThis',
-  },
+  plugins: [react()],
   resolve: {
     alias: {
       stream: 'stream-browserify',
+      events: 'events',
+      util: 'util',
+      fs: 'browserify-fs',
+      path: 'path-browserify',
       crypto: 'crypto-browserify',
+      http: 'stream-http',
+      https: 'https-browserify',
+      zlib: 'browserify-zlib',
+      assert: 'assert',
+      process: 'process/browser',
+    }
+  },
+  define: {
+    'process.env': {},
+    'global': 'globalThis',
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Node.js global to browser globalThis
+      define: {
+        global: 'globalThis'
+      }
+    }
+  },
+  build: {
+    rollupOptions: {
+      external: ['fs', 'path', 'crypto'],
+    },
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+  },
+  server: {
+    hmr: {
+      overlay: false
     }
   }
 });

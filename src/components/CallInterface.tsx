@@ -7,7 +7,7 @@ export function CallInterface() {
   const [connection, setConnection] = useState<SecureConnection | null>(null);
   const [signalData, setSignalData] = useState<string>('');
   const user = useStore((state) => state.user);
-  const { contact, isActive } = useStore((state) => state.callState);
+  const { contact, isActive, verificationFailed } = useStore((state) => state.callState);
   const setCallState = useStore((state) => state.setCallState);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export function CallInterface() {
           <h3 className="text-lg font-medium text-gray-900">
             Call with {contact.name}
           </h3>
-          {useStore((state) => state.callState.verificationFailed) ? (
+          {verificationFailed ? (
             <div className="mt-2 flex items-center justify-center text-red-600">
               <ShieldOff className="h-5 w-5 mr-2" />
               <span>Verification Failed!</span>
