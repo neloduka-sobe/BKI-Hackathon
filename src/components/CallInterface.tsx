@@ -3,32 +3,57 @@ import { PhoneOff, Shield, ShieldOff, Phone, X } from 'lucide-react';
 import { useStore } from '../store';
 import { SecureConnection } from '../utils/webrtc';
 import { Contact } from '../types';
-
-// Global variable to store incoming call notifications
-let globalIncomingCallHandler: ((contact: Contact) => void) | null = null;
+import { sendSignal, startListening, stopListening } from '../utils/signaling';
 
 export function CallInterface() {
   const [connection, setConnection] = useState<SecureConnection | null>(null);
-  const [signalData, setSignalData] = useState<string>('');
-  const [remoteSignalData, setRemoteSignalData] = useState<string>('');
-  const [incomingCall, setIncomingCall] = useState<Contact | null>(null);
   const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+  const [incomingCall, setIncomingCall] = useState<{contact: Contact, signalData: string} | null>(null);
   
   const user = useStore((state) => state.user);
   const { contact, isActive, verificationFailed } = useStore((state) => state.callState);
+  const contacts = useStore((state) => state.contacts);
   const setCallState = useStore((state) => state.setCallState);
 
-  // Set up global handler for incoming calls
+  // Set up signaling listener
   useEffect(() => {
-    globalIncomingCallHandler = (from: Contact) => {
-      console.log('Incoming call from', from);
-      setIncomingCall(from);
-    };
+    if (!user) return;
+    
+    // Start listening for incoming signals
+    startListening(user.id, (message) => {
+      console.log("Received signal:", message);
+      
+      if (message.type === 'offer') {
+        // Find the contact who sent this offer
+        const callingContact = contacts.find(c => c.id === message.from);
+        
+        if (callingContact) {
+          console.log(`Incoming call from ${callingContact.name}`);
+          setIncomingCall({
+            contact: callingContact,
+            signalData: message.data
+          });
+        } else {
+          console.warn("Received call from unknown contact ID:", message.from);
+        }
+      } else if (message.type === 'answer' && connection && contact && contact.id === message.from) {
+        // Handle incoming answer
+        console.log("Received answer, processing...");
+        connection.receiveAnswer(message.data)
+          .catch(error => {
+            console.error("Error receiving answer:", error);
+            setCallState({ verificationFailed: true });
+            setCallStatus('failed');
+          });
+      }
+    });
     
     return () => {
-      globalIncomingCallHandler = null;
+      if (user) {
+        stopListening(user.id);
+      }
     };
-  }, []);
+  }, [user, contacts, connection, contact]);
 
   // Handle outgoing calls
   useEffect(() => {
@@ -36,27 +61,35 @@ export function CallInterface() {
     
     // Only create a new connection if we're initiating a call
     if (connection === null) {
+      console.log(`Initiating call to ${contact.name}`);
       const conn = new SecureConnection(
         true, // initiator
         contact,
         user.privateKey,
-        () => setCallState({ verificationFailed: true }),
-        (incomingContact) => {
-          console.log('Received incoming call in callback', incomingContact);
-          setIncomingCall(incomingContact);
+        () => {
+          console.error("Verification failed");
+          setCallState({ verificationFailed: true });
         },
-        () => setCallStatus('connected')
+        () => {}, // No longer needed as we handle incoming calls via signaling
+        () => {
+          console.log("Connection established");
+          setCallStatus('connected');
+        }
       );
       
       conn.createOffer()
-        .then(setSignalData)
+        .then(offerData => {
+          // Send the offer via our signaling service
+          console.log("Sending offer...");
+          sendSignal(user.id, contact.id, 'offer', offerData);
+          setCallStatus('connecting');
+        })
         .catch(err => {
           console.error('Failed to create offer:', err);
           setCallStatus('failed');
         });
       
       setConnection(conn);
-      setCallStatus('connecting');
     }
     
     return () => {
@@ -67,59 +100,58 @@ export function CallInterface() {
     };
   }, [isActive, contact, user]);
 
-  // Handle remote signal data
-  useEffect(() => {
-    if (!connection || !remoteSignalData) return;
-    
-    connection.receiveAnswer(remoteSignalData)
-      .catch(error => {
-        console.error("Error receiving answer:", error);
-        setCallState({ verificationFailed: true });
-      });
-  }, [remoteSignalData, connection]);
-
   const acceptIncomingCall = async () => {
     if (!incomingCall || !user) return;
     
+    console.log(`Accepting call from ${incomingCall.contact.name}`);
+    
     const conn = new SecureConnection(
       false, // not initiator
-      incomingCall,
+      incomingCall.contact,
       user.privateKey,
-      () => setCallState({ verificationFailed: true }),
-      () => {}, // No need to handle incoming calls as we're already handling one
-      () => setCallStatus('connected')
+      () => {
+        console.error("Verification failed");
+        setCallState({ verificationFailed: true });
+      },
+      () => {}, // No longer needed as we handle incoming calls via signaling
+      () => {
+        console.log("Connection established");
+        setCallStatus('connected');
+      }
     );
     
-    const success = await conn.acceptCall();
-    if (success) {
+    try {
       // Process the offer and generate an answer
-      try {
-        const answer = await conn.receiveOffer(signalData);
-        setRemoteSignalData(answer);
-        setConnection(conn);
-        setCallState({ isActive: true, contact: incomingCall });
-        setIncomingCall(null);
-        setCallStatus('connecting');
-      } catch (error) {
-        console.error("Error accepting call:", error);
-        conn.destroy();
-      }
+      const answer = await conn.receiveOffer(incomingCall.signalData);
+      
+      // Send the answer via our signaling service
+      console.log("Sending answer...");
+      sendSignal(user.id, incomingCall.contact.id, 'answer', answer);
+      
+      setConnection(conn);
+      setCallState({ isActive: true, contact: incomingCall.contact });
+      setIncomingCall(null);
+      setCallStatus('connecting');
+    } catch (error) {
+      console.error("Error accepting call:", error);
+      conn.destroy();
+      setCallStatus('failed');
     }
   };
 
   const rejectIncomingCall = () => {
+    console.log("Call rejected");
     setIncomingCall(null);
   };
 
   const endCall = () => {
+    console.log("Ending call");
     if (connection) {
       connection.destroy();
       setConnection(null);
     }
     setCallState({ isActive: false, contact: undefined, verificationFailed: false });
     setCallStatus('idle');
-    setSignalData('');
-    setRemoteSignalData('');
   };
 
   // Render incoming call popup
@@ -132,7 +164,7 @@ export function CallInterface() {
               Incoming Call
             </h3>
             <p className="mt-2 text-gray-600">
-              {incomingCall.name} is calling you
+              {incomingCall.contact.name} is calling you
             </p>
           </div>
           
@@ -184,33 +216,10 @@ export function CallInterface() {
         </div>
 
         {callStatus === 'connecting' && (
-          <>
-            {signalData && (
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Share this code with {contact.name}:
-                </label>
-                <textarea
-                  readOnly
-                  value={signalData}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  rows={4}
-                />
-              </div>
-            )}
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Enter {contact.name}'s code:
-              </label>
-              <textarea
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                rows={4}
-                value={remoteSignalData}
-                onChange={(e) => setRemoteSignalData(e.target.value)}
-              />
-            </div>
-          </>
+          <div className="text-center mb-6 text-gray-600">
+            <p>Establishing connection...</p>
+            <p className="text-sm mt-2">Please wait while we connect you securely</p>
+          </div>
         )}
 
         {callStatus === 'connected' && (
@@ -239,13 +248,4 @@ export function CallInterface() {
       </div>
     </div>
   );
-}
-
-// Export the function to notify about incoming calls
-export function notifyIncomingCall(contact: Contact) {
-  if (globalIncomingCallHandler) {
-    globalIncomingCallHandler(contact);
-  } else {
-    console.error('No handler for incoming calls');
-  }
 }
