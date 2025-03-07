@@ -1,9 +1,9 @@
+// KeySetup.tsx
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { KeyRound, UserCircle } from 'lucide-react';
 import { generateKeyPair, exportPublicKey } from '../utils/crypto';
 import { useStore } from '../store';
-import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export function KeySetup() {
   const [name, setName] = useState('');
@@ -15,7 +15,12 @@ export function KeySetup() {
     const exportedPublicKey = await exportPublicKey(keyPair.publicKey);
     setPublicKeyQR(exportedPublicKey);
     
+    // Generate a random user ID
+    const userId = Math.random().toString(36).substring(2, 15) + 
+                   Math.random().toString(36).substring(2, 15);
+    
     setUser({
+      id: userId,
       name,
       publicKey: keyPair.publicKey,
       privateKey: keyPair.privateKey

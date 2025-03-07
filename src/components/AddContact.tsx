@@ -79,12 +79,26 @@ export function AddContact() {
     }
     
     try {
-      // Import the public key
-      const publicKey = await importPublicKey(publicKeyString);
+      let contactData: { id?: string, publicKey: string };
       
-      // Add to contacts
+      try {
+        // Try to parse as a JSON object that might contain ID
+        contactData = JSON.parse(publicKeyString);
+      } catch {
+        // If not valid JSON, assume it's just the public key
+        contactData = { publicKey: publicKeyString };
+      }
+      
+      // Import the public key
+      const publicKey = await importPublicKey(
+        typeof contactData.publicKey === 'string' 
+          ? contactData.publicKey 
+          : publicKeyString
+      );
+      
+      // Add to contacts with an ID from the data or generate one
       addContact({
-        id: Date.now().toString(),
+        id: contactData.id || Math.random().toString(36).substring(2, 15),
         name: name.trim(),
         publicKey
       });
