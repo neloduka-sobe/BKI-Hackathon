@@ -1,195 +1,213 @@
-import React, { useState, useEffect } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
-import { KeyRound, UserPlus, Copy, Check, Scan } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { PhoneOff, Shield, ShieldOff, Phone, X } from 'lucide-react';
 import { useStore } from '../store';
-import { exportPublicKey, importPublicKey } from '../utils/crypto';
+import { SecureConnection } from '../utils/webrtc';
+import { Contact } from '../types';
 
 export function ConnectionManager() {
-  const [isScanning, setIsScanning] = useState(false);
-  const [manualKey, setManualKey] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [contactName, setContactName] = useState('');
-  const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
+  const [connection, setConnection] = useState<SecureConnection | null>(null);
+  const [signalData, setSignalData] = useState<string>('');
+  const [remoteSignalData, setRemoteSignalData] = useState<string>('');
+  const [incomingCall, setIncomingCall] = useState<Contact | null>(null);
+  const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   
   const user = useStore((state) => state.user);
-  const addContact = useStore((state) => state.addContact);
+  const { contact, isActive, verificationFailed } = useStore((state) => state.callState);
+  const setCallState = useStore((state) => state.setCallState);
 
+  // Handle outgoing calls
   useEffect(() => {
-    return () => {
-      scanner?.clear();
-    };
-  }, [scanner]);
-
-  const handleScanStart = () => {
-    const newScanner = new Html5QrcodeScanner(
-      'qr-reader',
-      { fps: 10, qrbox: { width: 250, height: 250 } },
-      false
-    );
-
-    newScanner.render(
-      async (decodedText) => {
-        try {
-          const publicKey = await importPublicKey(decodedText);
-          addContact({
-            id: crypto.randomUUID(),
-            name: contactName || 'Unknown Contact',
-            publicKey
-          });
-          newScanner.clear();
-          setIsScanning(false);
-          setContactName('');
-        } catch (error) {
-          console.error('Failed to import key:', error);
-        }
-      },
-      (error) => {
-        console.warn(error);
-      }
-    );
-
-    setScanner(newScanner);
-    setIsScanning(true);
-  };
-
-  const handleManualImport = async () => {
-    try {
-      const publicKey = await importPublicKey(manualKey);
-      addContact({
-        id: crypto.randomUUID(),
-        name: contactName || 'Unknown Contact',
-        publicKey
-      });
-      setManualKey('');
-      setContactName('');
-    } catch (error) {
-      console.error('Failed to import key:', error);
-    }
-  };
-
-  const copyPublicKey = async () => {
-    if (!user) return;
+    if (!isActive || !contact || !user) return;
     
-    try {
-      const publicKeyString = await exportPublicKey(user.publicKey);
-      await navigator.clipboard.writeText(publicKeyString);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy key:', error);
+    // Only create a new connection if we're initiating a call
+    if (connection === null) {
+      const conn = new SecureConnection(
+        true, // initiator
+        contact,
+        user.privateKey,
+        () => setCallState({ verificationFailed: true }),
+        (incomingContact) => setIncomingCall(incomingContact),
+        () => setCallStatus('connected')
+      );
+      
+      conn.createOffer().then(setSignalData);
+      setConnection(conn);
+      setCallStatus('connecting');
+    }
+    
+    return () => {
+      if (connection) {
+        connection.destroy();
+        setConnection(null);
+      }
+    };
+  }, [isActive, contact, user]);
+
+  // Handle remote signal data
+  useEffect(() => {
+    if (!connection || !remoteSignalData) return;
+    
+    connection.receiveAnswer(remoteSignalData)
+      .catch(error => {
+        console.error("Error receiving answer:", error);
+        setCallState({ verificationFailed: true });
+      });
+  }, [remoteSignalData, connection]);
+
+  // Process incoming calls
+  const handleIncomingCall = (from: Contact) => {
+    setIncomingCall(from);
+  };
+
+  const acceptIncomingCall = async () => {
+    if (!incomingCall || !user) return;
+    
+    const conn = new SecureConnection(
+      false, // not initiator
+      incomingCall,
+      user.privateKey,
+      () => setCallState({ verificationFailed: true }),
+      () => {}, // No need to handle incoming calls as we're already handling one
+      () => setCallStatus('connected')
+    );
+    
+    const success = await conn.acceptCall();
+    if (success) {
+      // Process the offer and generate an answer
+      try {
+        const answer = await conn.receiveOffer(signalData);
+        setRemoteSignalData(answer);
+        setConnection(conn);
+        setCallState({ isActive: true, contact: incomingCall });
+        setIncomingCall(null);
+        setCallStatus('connecting');
+      } catch (error) {
+        console.error("Error accepting call:", error);
+        conn.destroy();
+      }
     }
   };
 
-  if (!user) return null;
+  const rejectIncomingCall = () => {
+    setIncomingCall(null);
+  };
 
-  return (
-    <div className="space-y-8">
-      {/* Share Your Key Section */}
-      <div className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <KeyRound className="h-6 w-6 text-blue-500" />
-          Share Your Key
-        </h2>
-        <div className="space-y-4">
-          <div className="flex justify-center">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <QRCodeSVG
-                value={user ? exportPublicKey(user.publicKey) : ''}
-                size={200}
-              />
-            </div>
+  const endCall = () => {
+    if (connection) {
+      connection.destroy();
+      setConnection(null);
+    }
+    setCallState({ isActive: false, contact: undefined, verificationFailed: false });
+    setCallStatus('idle');
+    setSignalData('');
+    setRemoteSignalData('');
+  };
+
+  // Render incoming call popup
+  if (incomingCall) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-in fade-in">
+          <div className="text-center mb-8">
+            <h3 className="text-lg font-medium text-gray-900">
+              Incoming Call
+            </h3>
+            <p className="mt-2 text-gray-600">
+              {incomingCall.name} is calling you
+            </p>
           </div>
-          <button
-            onClick={copyPublicKey}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            {copied ? (
-              <>
-                <Check className="h-4 w-4" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                Copy Public Key
-              </>
-            )}
-          </button>
+          
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={rejectIncomingCall}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Reject
+            </button>
+            <button
+              onClick={acceptIncomingCall}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+            >
+              <Phone className="h-4 w-4 mr-2" />
+              Accept
+            </button>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Add Contact Section */}
-      <div className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <UserPlus className="h-6 w-6 text-blue-500" />
-          Add New Contact
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Contact Name
-            </label>
-            <input
-              type="text"
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter contact name"
-            />
-          </div>
+  // Render active call interface
+  if (!isActive || !contact) return null;
 
-          {isScanning ? (
-            <div>
-              <div id="qr-reader" className="mb-4"></div>
-              <button
-                onClick={() => {
-                  scanner?.clear();
-                  setIsScanning(false);
-                }}
-                className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-              >
-                Cancel Scanning
-              </button>
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+        <div className="text-center mb-8">
+          <h3 className="text-lg font-medium text-gray-900">
+            Call with {contact.name}
+          </h3>
+          
+          {verificationFailed ? (
+            <div className="mt-2 flex items-center justify-center text-red-600">
+              <ShieldOff className="h-5 w-5 mr-2" />
+              <span>Verification Failed!</span>
             </div>
           ) : (
-            <button
-              onClick={handleScanStart}
-              className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <Scan className="h-4 w-4" />
-              Scan QR Code
-            </button>
+            <div className="mt-2 flex items-center justify-center text-green-600">
+              <Shield className="h-5 w-5 mr-2" />
+              <span>
+                {callStatus === 'connected' ? 'Secure Connection' : 'Connecting...'}
+              </span>
+            </div>
           )}
+        </div>
 
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300"></div>
+        {callStatus === 'connecting' && (
+          <>
+            {signalData && (
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Share this code with {contact.name}:
+                </label>
+                <textarea
+                  readOnly
+                  value={signalData}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  rows={4}
+                />
+              </div>
+            )}
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter {contact.name}'s code:
+              </label>
+              <textarea
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                rows={4}
+                value={remoteSignalData}
+                onChange={(e) => setRemoteSignalData(e.target.value)}
+              />
             </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-gray-500">Or</span>
-            </div>
-          </div>
+          </>
+        )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paste Public Key
-            </label>
-            <textarea
-              value={manualKey}
-              onChange={(e) => setManualKey(e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Paste the public key here"
-            />
+        {callStatus === 'connected' && (
+          <div className="text-center mb-6 text-gray-600">
+            <p>Call in progress</p>
+            <p className="text-sm mt-2">This call is end-to-end encrypted</p>
           </div>
+        )}
 
+        <div className="flex justify-center">
           <button
-            onClick={handleManualImport}
-            disabled={!manualKey}
-            className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            onClick={endCall}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
           >
-            Import Key
+            <PhoneOff className="h-4 w-4 mr-2" />
+            End Call
           </button>
         </div>
       </div>

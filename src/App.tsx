@@ -1,8 +1,9 @@
 import React from 'react';
 import { KeySetup } from './components/KeySetup';
-import { ConnectionManager } from './components/ConnectionManager';
-import { ContactList } from './components/ContactList';
 import { CallInterface } from './components/CallInterface';
+import { ContactList } from './components/ContactList';
+import { AddContact } from './components/AddContact';
+import { ProfileDisplay } from './components/ProfileDisplay';
 import { useStore } from './store';
 
 function App() {
@@ -29,8 +30,15 @@ function App() {
                 <p className="mt-1 text-sm text-gray-500">Your secure identity has been created</p>
               </div>
             </div>
+            
+            <ProfileDisplay />
+            
+            <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Add Contacts</h2>
+              <AddContact />
+            </div>
+            
             <ContactList />
-            <ConnectionManager />
             <CallInterface />
           </div>
         )}
