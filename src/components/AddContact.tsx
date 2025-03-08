@@ -191,7 +191,7 @@ export function AddContact() {
       
       {isOpen && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
-          <div style={{ backgroundColor: '#343944' }} className="shadow px-4 py-5 sm:rounded-lg sm:p-6">
+          <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium text-gray-900">Add New Contact</h3>
               <button 
