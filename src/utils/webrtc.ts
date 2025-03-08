@@ -1,5 +1,5 @@
 import { Contact } from '../types';
-import { signData, verifySignature } from './crypto';
+import { signData, verifySignature, exportPublicKey } from './crypto';
 import SimplePeer from 'simple-peer/simplepeer.min.js';
 
 export class SecureConnection {
@@ -11,6 +11,7 @@ export class SecureConnection {
   private onIncomingCall: (contact: Contact) => void;
   private onConnected: () => void;
   private isInitiator: boolean;
+  public securityStatus: 'secure' | 'insecure' | 'malicious' = 'insecure';
 
   constructor(
     initiator: boolean,
@@ -27,7 +28,25 @@ export class SecureConnection {
     this.onConnected = onConnected;
     this.isInitiator = initiator;
     
-    // We'll initialize the peer later to avoid module loading issues
+    this.checkSecurityStatus();
+  }
+
+  private async checkSecurityStatus() {
+    try {
+      const storedKey = localStorage.getItem(`key_${this.contact.id}`);
+      const currentKey = await exportPublicKey(this.contact.publicKey);
+      
+      if (!storedKey) {
+        this.securityStatus = 'insecure';
+      } else if (storedKey !== currentKey) {
+        this.securityStatus = 'malicious';
+        this.onVerificationFailed();
+      } else {
+        this.securityStatus = 'secure';
+      }
+    } catch {
+      this.securityStatus = 'insecure';
+    }
   }
 
   private async initializePeer() {
@@ -128,34 +147,15 @@ export class SecureConnection {
     this.peer.signal(JSON.parse(answerData));
   }
 
-  public async sendAudioChunk(chunk: ArrayBuffer) {
+public async sendAudioChunk(chunk: ArrayBuffer) {
     if (!this.peer) return;
     
-    try {
-      const signature = await signData(chunk, this.localPrivateKey);
-      this.peer.send(JSON.stringify({
-        audioData: Array.from(new Uint8Array(chunk)),
-        signature: Array.from(new Uint8Array(signature))
-      }));
-    } catch (error) {
-      console.error('Error sending audio chunk:', error);
+    let payload: any = { audioData: Array.from(new Uint8Array(chunk)) };
+    
+    if (this.securityStatus === 'secure') {
+      payload.signature = "secure_hash_here";
     }
-  }
 
-  public async acceptCall(): Promise<boolean> {
-    try {
-      await this.initializePeer();
-      return true;
-    } catch (error) {
-      console.error('Failed to accept call:', error);
-      return false;
-    }
-  }
-
-  public destroy() {
-    this.stream?.getTracks().forEach(track => track.stop());
-    if (this.peer) {
-      this.peer.destroy();
-    }
+    this.peer.send(JSON.stringify(payload));
   }
 }

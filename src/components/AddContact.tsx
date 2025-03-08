@@ -96,6 +96,9 @@ export function AddContact() {
           : publicKeyString
       );
       
+      // Store key in localStorage
+      localStorage.setItem(`key_${contactData.id || Math.random().toString(36).substring(2, 15)}`, publicKeyString);
+      
       // Add to contacts with an ID from the data or generate one
       addContact({
         id: contactData.id || Math.random().toString(36).substring(2, 15),
