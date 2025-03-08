@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { PhoneOff, Shield, ShieldOff, Phone, X } from 'lucide-react';
+import { PhoneOff, Shield, ShieldAlert, Phone, X } from 'lucide-react';
 import { useStore } from '../store';
 import { SecureConnection } from '../utils/webrtc';
 import { Contact } from '../types';
@@ -7,7 +7,7 @@ import { sendSignal, startListening, stopListening } from '../utils/signaling';
 
 export function CallInterface() {
   const [connection, setConnection] = useState<SecureConnection | null>(null);
-  const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+  const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'verifying' | 'connected' | 'failed'>('idle');
   const [incomingCall, setIncomingCall] = useState<{contact: Contact, signalData: string} | null>(null);
   
   const user = useStore((state) => state.user);
@@ -62,17 +62,23 @@ export function CallInterface() {
     // Only create a new connection if we're initiating a call
     if (connection === null) {
       console.log(`Initiating call to ${contact.name}`);
+      
+      setCallStatus('connecting');
+      
       const conn = new SecureConnection(
         true, // initiator
         contact,
         user.privateKey,
+        user.publicKey, // Added public key
+        user.id, // Added user id
         () => {
           console.error("Verification failed");
           setCallState({ verificationFailed: true });
+          setCallStatus('failed');
         },
         () => {}, // No longer needed as we handle incoming calls via signaling
         () => {
-          console.log("Connection established");
+          console.log("Connection established and identity verified");
           setCallStatus('connected');
         }
       );
@@ -82,7 +88,7 @@ export function CallInterface() {
           // Send the offer via our signaling service
           console.log("Sending offer...");
           sendSignal(user.id, contact.id, 'offer', offerData);
-          setCallStatus('connecting');
+          setCallStatus('verifying');
         })
         .catch(err => {
           console.error('Failed to create offer:', err);
@@ -104,18 +110,22 @@ export function CallInterface() {
     if (!incomingCall || !user) return;
     
     console.log(`Accepting call from ${incomingCall.contact.name}`);
+    setCallStatus('verifying');
     
     const conn = new SecureConnection(
       false, // not initiator
       incomingCall.contact,
       user.privateKey,
+      user.publicKey, // Added public key
+      user.id, // Added user id
       () => {
         console.error("Verification failed");
         setCallState({ verificationFailed: true });
+        setCallStatus('failed');
       },
       () => {}, // No longer needed as we handle incoming calls via signaling
       () => {
-        console.log("Connection established");
+        console.log("Connection established and identity verified");
         setCallStatus('connected');
       }
     );
@@ -131,7 +141,6 @@ export function CallInterface() {
       setConnection(conn);
       setCallState({ isActive: true, contact: incomingCall.contact });
       setIncomingCall(null);
-      setCallStatus('connecting');
     } catch (error) {
       console.error("Error accepting call:", error);
       conn.destroy();
@@ -202,14 +211,20 @@ export function CallInterface() {
           
           {verificationFailed ? (
             <div className="mt-2 flex items-center justify-center text-red-600">
-              <ShieldOff className="h-5 w-5 mr-2" />
-              <span>Verification Failed!</span>
+              <ShieldAlert className="h-5 w-5 mr-2" />
+              <span>Identity Verification Failed!</span>
             </div>
           ) : (
             <div className="mt-2 flex items-center justify-center text-green-600">
               <Shield className="h-5 w-5 mr-2" />
               <span>
-                {callStatus === 'connected' ? 'Secure Connection' : callStatus === 'failed' ? 'Connection Failed' : 'Connecting...'}
+                {callStatus === 'connected' 
+                  ? 'Secure Connection' 
+                  : callStatus === 'verifying' 
+                    ? 'Verifying Identity...' 
+                    : callStatus === 'failed' 
+                      ? 'Connection Failed' 
+                      : 'Connecting...'}
               </span>
             </div>
           )}
@@ -222,17 +237,28 @@ export function CallInterface() {
           </div>
         )}
 
+        {callStatus === 'verifying' && (
+          <div className="text-center mb-6 text-gray-600">
+            <p>Verifying identity...</p>
+            <p className="text-sm mt-2">Making sure you're connected to the real {contact.name}</p>
+          </div>
+        )}
+
         {callStatus === 'connected' && (
           <div className="text-center mb-6 text-gray-600">
             <p>Call in progress</p>
-            <p className="text-sm mt-2">This call is end-to-end encrypted</p>
+            <p className="text-sm mt-2">This call is end-to-end encrypted with verified identity</p>
           </div>
         )}
 
         {callStatus === 'failed' && (
           <div className="text-center mb-6 text-red-600">
             <p>Call connection failed</p>
-            <p className="text-sm mt-2">Please try again later</p>
+            {verificationFailed ? (
+              <p className="text-sm mt-2">Identity verification failed. This might not be the real {contact.name}!</p>
+            ) : (
+              <p className="text-sm mt-2">Please try again later</p>
+            )}
           </div>
         )}
 
