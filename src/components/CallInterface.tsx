@@ -158,7 +158,7 @@ export function CallInterface() {
   if (incomingCall) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-in fade-in">
+        <div className="bg-[#343944] shadow px-4 py-5 sm:rounded-lg sm:p-6">
           <div className="text-center mb-8">
             <h3 className="text-lg font-medium text-gray-900">
               Incoming Call

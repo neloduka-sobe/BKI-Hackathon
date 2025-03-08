@@ -26,18 +26,24 @@ function App() {
           <div className="space-y-6">
             <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
               <div className="text-center">
-                <p className="text-xl font-medium text-gray-900">Welcome, {user.name || 'Anonymous'}</p>
-                <p className="mt-1 text-sm text-gray-500">Your secure identity has been created</p>
+                <p className="text-xl font-medium text-gray-900">
+                  Welcome, {user.name || 'Anonymous'}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Your secure identity has been created
+                </p>
               </div>
             </div>
-            
+
             <ProfileDisplay />
-            
+
             <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Add Contacts</h2>
+              <h2 className="text-lg font-medium text-gray-900 mb-4">
+                Add Contacts
+              </h2>
               <AddContact />
             </div>
-            
+
             <ContactList />
             <CallInterface />
           </div>

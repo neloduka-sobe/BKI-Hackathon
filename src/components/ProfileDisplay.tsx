@@ -39,7 +39,7 @@ export function ProfileDisplay() {
   if (!user) return null;
 
   return (
-    <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+    <div className="bg-[#343944] shadow px-4 py-5 sm:rounded-lg sm:p-6">
       <div className="flex items-center space-x-4 mb-6">
         <KeyRound className="h-6 w-6 text-blue-500" />
         <h2 className="text-xl font-bold text-gray-800">Your Profile</h2>
