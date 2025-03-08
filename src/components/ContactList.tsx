@@ -11,7 +11,7 @@ export function ContactList() {
   };
 
   return (
-    <div className="bg-[#343944] shadow px-4 py-5 sm:rounded-lg sm:p-6">
+    <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
       <h2 className="text-xl font-semibold text-gray-800 mb-4">Your Contacts</h2>
       
       {contacts.length === 0 ? (
